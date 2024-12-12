@@ -11,9 +11,7 @@ import os
 app = FastAPI()
 security = HTTPBearer()
 
-BEARER_TOKEN = os.getenv(
-    "BEARER_TOKEN", "OEyx8jYD5BiApgFsaDHhf0GT6MIKtuQW5Swmjr6upqMoiu"
-)
+BEARER_TOKEN = os.getenv("BEARER_TOKEN")
 
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
