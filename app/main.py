@@ -1,16 +1,34 @@
 import uvicorn
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Security, Header
 from typing import Optional, Union
 import base64
 from .models import OCRRequest, SlideMatchRequest, DetectionRequest, APIResponse
 from .services import ocr_service
+from starlette.datastructures import UploadFile as StarletteUploadFile
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+import os
 
 app = FastAPI()
+security = HTTPBearer()
 
-from starlette.datastructures import UploadFile as StarletteUploadFile
+BEARER_TOKEN = os.getenv(
+    "BEARER_TOKEN", "OEyx8jYD5BiApgFsaDHhf0GT6MIKtuQW5Swmjr6upqMoiu"
+)
 
 
-async def decode_image(image: Union[UploadFile, StarletteUploadFile, str, None]) -> bytes:
+def verify_token(credentials: HTTPAuthorizationCredentials = Security(security)):
+    if credentials.credentials != BEARER_TOKEN:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return credentials.credentials
+
+
+async def decode_image(
+    image: Union[UploadFile, StarletteUploadFile, str, None]
+) -> bytes:
     if image is None:
         raise HTTPException(status_code=400, detail="No image provided")
 
@@ -19,9 +37,9 @@ async def decode_image(image: Union[UploadFile, StarletteUploadFile, str, None])
     elif isinstance(image, str):
         try:
             # 检查是否是 base64 编码的图片
-            if image.startswith(('data:image/', 'data:application/')):
+            if image.startswith(("data:image/", "data:application/")):
                 # 移除 MIME 类型前缀
-                image = image.split(',')[1]
+                image = image.split(",")[1]
             return base64.b64decode(image)
         except:
             raise HTTPException(status_code=400, detail="Invalid base64 string")
@@ -31,18 +49,23 @@ async def decode_image(image: Union[UploadFile, StarletteUploadFile, str, None])
 
 @app.post("/ocr", response_model=APIResponse)
 async def ocr_endpoint(
-        file: Optional[UploadFile] = File(None),
-        image: Optional[str] = Form(None),
-        probability: bool = Form(False),
-        charsets: Optional[str] = Form(None),
-        png_fix: bool = Form(False)
+    token: str = Security(verify_token),
+    file: Optional[UploadFile] = File(None),
+    image: Optional[str] = Form(None),
+    probability: bool = Form(False),
+    charsets: Optional[str] = Form(None),
+    png_fix: bool = Form(False),
 ):
     try:
         if file is None and image is None:
-            return APIResponse(code=400, message="Either file or image must be provided")
+            return APIResponse(
+                code=400, message="Either file or image must be provided"
+            )
 
         image_bytes = await decode_image(file or image)
-        result = ocr_service.ocr_classification(image_bytes, probability, charsets, png_fix)
+        result = ocr_service.ocr_classification(
+            image_bytes, probability, charsets, png_fix
+        )
         return APIResponse(code=200, message="Success", data=result)
     except Exception as e:
         return APIResponse(code=500, message=str(e))
@@ -50,15 +73,20 @@ async def ocr_endpoint(
 
 @app.post("/slide_match", response_model=APIResponse)
 async def slide_match_endpoint(
-        target_file: Optional[UploadFile] = File(None),
-        background_file: Optional[UploadFile] = File(None),
-        target: Optional[str] = Form(None),
-        background: Optional[str] = Form(None),
-        simple_target: bool = Form(False)
+    token: str = Security(verify_token),
+    target_file: Optional[UploadFile] = File(None),
+    background_file: Optional[UploadFile] = File(None),
+    target: Optional[str] = Form(None),
+    background: Optional[str] = Form(None),
+    simple_target: bool = Form(False),
 ):
     try:
-        if (background is None and target is None) or (background_file.size == 0 and target_file.size == 0):
-            return APIResponse(code=400, message="Both target and background must be provided")
+        if (background is None and target is None) or (
+            background_file.size == 0 and target_file.size == 0
+        ):
+            return APIResponse(
+                code=400, message="Both target and background must be provided"
+            )
 
         target_bytes = await decode_image(target_file or target)
         background_bytes = await decode_image(background_file or background)
@@ -70,12 +98,15 @@ async def slide_match_endpoint(
 
 @app.post("/detection", response_model=APIResponse)
 async def detection_endpoint(
-        file: Optional[UploadFile] = File(None),
-        image: Optional[str] = Form(None)
+    token: str = Security(verify_token),
+    file: Optional[UploadFile] = File(None),
+    image: Optional[str] = Form(None),
 ):
     try:
         if file is None and image is None:
-            return APIResponse(code=400, message="Either file or image must be provided")
+            return APIResponse(
+                code=400, message="Either file or image must be provided"
+            )
 
         image_bytes = await decode_image(file or image)
         bboxes = ocr_service.detection(image_bytes)
